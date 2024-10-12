@@ -17,11 +17,13 @@ def extract_text_from_image(image_path):
 
 # Function to process images in folder A and export transcriptions to a CSV file in folder B
 def process_images(input_folder, output_folder, output_csv):
+    # Create the output folder if it doesn't exist
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
     csv_rows = []
 
+    # Iterate through each file in the input folder
     for filename in os.listdir(input_folder):
         if filename.lower().endswith((".png", ".tiff", ".jpg", ".jpeg")):
             input_image_path = os.path.join(input_folder, filename)
@@ -52,9 +54,9 @@ def process_images(input_folder, output_folder, output_csv):
     print(f"Saved transcriptions to {csv_output_path}")
 
 if __name__ == "__main__":
-    # Folder A contains the input images, and Folder B will hold the output CSV
-    input_folder = "/A"
-    output_folder = "/B"
+    # Set the correct paths for Folder A (input images) and Folder B (output CSV)
+    input_folder = "A"  # Relative path to Folder A
+    output_folder = "B"  # Relative path to Folder B
     output_csv = "transcriptions.csv"
 
     process_images(input_folder, output_folder, output_csv)
