@@ -14,6 +14,9 @@ spell = SpellChecker()
 # Function to preprocess the image for better OCR results
 def preprocess_image(image_path):
     with Image.open(image_path) as img:
+        # Resize the image slightly
+        img = img.resize((int(img.width * 1.1), int(img.height * 1.1)), Image.LANCZOS)  # Increase size by 10%
+
         # Convert to grayscale
         img = img.convert('L')
         # Apply a Gaussian blur to reduce noise
@@ -22,26 +25,47 @@ def preprocess_image(image_path):
         img = img.point(lambda x: 0 if x < 128 else 255, '1')
         return img
 
-# Function to perform OCR on an image and extract text using typed text recognition
-def extract_text_typed(image_path):
-    try:
-        img = preprocess_image(image_path)
-        # Use Tesseract for typed text
-        text = pytesseract.image_to_string(img, lang='eng', config='--psm 6')
-        return text.strip()
-    except Exception as e:
-        print(f"Error processing {image_path} for typed text: {e}")
-        return ""
+# Function to merge new recognized words into existing text
+def merge_text(existing_text, new_text):
+    if not existing_text:
+        return new_text.strip()
+    
+    # Split existing text and new text into word lists
+    existing_words = set(existing_text.split())
+    new_words = set(new_text.split())
 
-# Function to perform OCR on an image and extract text using handwritten text recognition
-def extract_text_handwritten(image_path):
+    # Combine both sets of words
+    combined_words = existing_words.union(new_words)
+
+    # Reconstruct text from combined words
+    combined_text = ' '.join(combined_words)
+    return combined_text.strip()
+
+# Function to extract text using the eng+handwriting model
+def extract_text(image_path, attempt=1, max_attempts=3):
     try:
         img = preprocess_image(image_path)
-        # Use Tesseract for handwritten text
-        text = pytesseract.image_to_string(img, lang='eng+handwriting', config='--psm 6')
-        return text.strip()
+        text = pytesseract.image_to_string(img, lang='eng+handwriting', config='--psm 6').strip()
+
+        if not text:
+            return text
+        
+        # Split the text into words
+        words = text.split()
+        
+        # Check for nonsensical words
+        invalid_count = sum(1 for word in words if word not in spell)
+        
+        # If there are too many unrecognized words in a row, retry (up to max_attempts)
+        if invalid_count >= len(words) * 0.5:  # If more than 50% of the words seem nonsensical
+            if attempt < max_attempts:
+                print(f"Rescanning {image_path}, attempt {attempt+1}...")
+                return extract_text(image_path, attempt+1, max_attempts)
+
+        return text
+
     except Exception as e:
-        print(f"Error processing {image_path} for handwritten text: {e}")
+        print(f"Error processing {image_path}: {e}")
         return ""
 
 # Function to filter out unrecognized words from extracted text
@@ -53,7 +77,7 @@ def filter_recognized_words(text):
     text = re.sub(r'[^a-zA-Z0-9\s.,;\'"?!-]', '', text)  # Keep letters, numbers, spaces, and some punctuation
     # Split the text into words
     words = text.split()
-
+    
     # Length filtering: Discard words shorter than 2 characters or longer than 15 characters
     words = [word for word in words if 2 <= len(word) <= 15]
 
@@ -80,12 +104,8 @@ def process_images(input_folder, output_folder, output_csv):
             input_image_path = os.path.join(input_folder, filename)
             print(f"Processing {filename}...")
 
-            # Try extracting text as typed
-            text = extract_text_typed(input_image_path)
-
-            # If no text found, try extracting as handwritten
-            if not text:
-                text = extract_text_handwritten(input_image_path)
+            # Extract text using the eng+handwriting model, with rescan for nonsensical results
+            text = extract_text(input_image_path)
 
             # Filter out unrecognized words
             filtered_text = filter_recognized_words(text)
