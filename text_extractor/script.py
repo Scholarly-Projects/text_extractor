@@ -25,6 +25,15 @@ def preprocess_image(image_path):
         img = img.point(lambda x: 0 if x < 128 else 255, '1')
         return img
 
+# Function to calculate text density
+def calculate_text_density(image):
+    # Convert to black and white to count pixels
+    bw_image = image.convert('1')  # Convert to binary (black and white)
+    total_pixels = bw_image.size[0] * bw_image.size[1]
+    text_pixels = sum(1 for pixel in bw_image.getdata() if pixel == 0)  # Count black pixels (text)
+
+    return text_pixels / total_pixels if total_pixels > 0 else 0
+
 # Function to merge new recognized words into existing text
 def merge_text(existing_text, new_text):
     if not existing_text:
@@ -50,18 +59,6 @@ def extract_text(image_path, attempt=1, max_attempts=3):
         if not text:
             return text
         
-        # Split the text into words
-        words = text.split()
-        
-        # Check for nonsensical words
-        invalid_count = sum(1 for word in words if word not in spell)
-        
-        # If there are too many unrecognized words in a row, retry (up to max_attempts)
-        if invalid_count >= len(words) * 0.5:  # If more than 50% of the words seem nonsensical
-            if attempt < max_attempts:
-                print(f"Rescanning {image_path}, attempt {attempt+1}...")
-                return extract_text(image_path, attempt+1, max_attempts)
-
         return text
 
     except Exception as e:
@@ -75,20 +72,32 @@ def filter_recognized_words(text):
 
     # Remove unwanted characters while retaining common punctuation
     text = re.sub(r'[^a-zA-Z0-9\s.,;\'"?!-]', '', text)  # Keep letters, numbers, spaces, and some punctuation
+
     # Split the text into words
     words = text.split()
-    
-    # Length filtering: Discard words shorter than 2 characters or longer than 15 characters
-    words = [word for word in words if 2 <= len(word) <= 15]
 
-    # Pattern filtering: Discard repeated characters and numeric-only words
+    # Length filtering: Discard words shorter than 3 characters or longer than 15 characters
+    words = [word for word in words if 3 <= len(word) <= 15]
+
+    # Pattern filtering: Discard repeated characters, numeric-only words, and gibberish
     words = [word for word in words if not re.search(r'(.)\1{2,}', word) and not re.match(r'^\d+$', word)]
+    
+    # Filter out common nonsensical words or excessive gibberish
+    words = [word for word in words if len(word) > 2 and len(set(word)) > 1]  # Requires more than one unique character
 
     # Filter words using the spell checker and dictionary
     recognized_words = [word for word in words if word in spell]
 
     # Join the recognized words back into a string
     return ' '.join(recognized_words)
+
+# Function to check if the image likely contains meaningful text
+def is_text_image(image):
+    # Calculate the text density
+    density_threshold = 0.2  # You can adjust this threshold
+    density = calculate_text_density(image)
+
+    return density >= density_threshold
 
 # Function to process images in folder A and export transcriptions to a CSV file in folder B
 def process_images(input_folder, output_folder, output_csv):
@@ -107,16 +116,22 @@ def process_images(input_folder, output_folder, output_csv):
             # Extract text using the eng+handwriting model, with rescan for nonsensical results
             text = extract_text(input_image_path)
 
-            # Filter out unrecognized words
-            filtered_text = filter_recognized_words(text)
+            # Open image to check if it likely contains text
+            with Image.open(input_image_path) as img:
+                if is_text_image(img):
+                    # Filter out unrecognized words
+                    filtered_text = filter_recognized_words(text)
 
-            if filtered_text:  # If any recognized text is detected
-                # Format the text for CSV output
-                formatted_text = f'includes the text: "{filtered_text}"'
-                csv_rows.append([filename, formatted_text])
-            else:
-                # If no text is detected, leave the column empty
-                csv_rows.append([filename, "No text detected"])
+                    if filtered_text:  # If any recognized text is detected
+                        # Format the text for CSV output
+                        formatted_text = f'includes the text: "{filtered_text}"'
+                        csv_rows.append([filename, formatted_text])
+                    else:
+                        # If no text is detected, leave the column empty
+                        csv_rows.append([filename, "No text detected"])
+                else:
+                    print(f"Skipped {filename}: Not enough text density.")
+                    csv_rows.append([filename, "Not enough text density"])
 
     # Sort the rows alphabetically by filename (first column)
     csv_rows.sort(key=lambda x: x[0].lower())  # Sort case-insensitively
