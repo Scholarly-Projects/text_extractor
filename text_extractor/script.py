@@ -25,15 +25,6 @@ def preprocess_image(image_path):
         img = img.point(lambda x: 0 if x < 128 else 255, '1')
         return img
 
-# Function to calculate text density
-def calculate_text_density(image):
-    # Convert to black and white to count pixels
-    bw_image = image.convert('1')  # Convert to binary (black and white)
-    total_pixels = bw_image.size[0] * bw_image.size[1]
-    text_pixels = sum(1 for pixel in bw_image.getdata() if pixel == 0)  # Count black pixels (text)
-
-    return text_pixels / total_pixels if total_pixels > 0 else 0
-
 # Function to merge new recognized words into existing text
 def merge_text(existing_text, new_text):
     if not existing_text:
@@ -91,14 +82,6 @@ def filter_recognized_words(text):
     # Join the recognized words back into a string
     return ' '.join(recognized_words)
 
-# Function to check if the image likely contains meaningful text
-def is_text_image(image):
-    # Calculate the text density
-    density_threshold = 0.2  # You can adjust this threshold
-    density = calculate_text_density(image)
-
-    return density >= density_threshold
-
 # Function to process images in folder A and export transcriptions to a CSV file in folder B
 def process_images(input_folder, output_folder, output_csv):
     # Create the output folder if it doesn't exist
@@ -116,22 +99,16 @@ def process_images(input_folder, output_folder, output_csv):
             # Extract text using the eng+handwriting model, with rescan for nonsensical results
             text = extract_text(input_image_path)
 
-            # Open image to check if it likely contains text
-            with Image.open(input_image_path) as img:
-                if is_text_image(img):
-                    # Filter out unrecognized words
-                    filtered_text = filter_recognized_words(text)
+            # Filter out unrecognized words
+            filtered_text = filter_recognized_words(text)
 
-                    if filtered_text:  # If any recognized text is detected
-                        # Format the text for CSV output
-                        formatted_text = f'includes the text: "{filtered_text}"'
-                        csv_rows.append([filename, formatted_text])
-                    else:
-                        # If no text is detected, leave the column empty
-                        csv_rows.append([filename, "No text detected"])
-                else:
-                    print(f"Skipped {filename}: Not enough text density.")
-                    csv_rows.append([filename, "Not enough text density"])
+            if filtered_text:  # If any recognized text is detected
+                # Format the text for CSV output
+                formatted_text = f'includes the text: "{filtered_text}"'
+                csv_rows.append([filename, formatted_text])
+            else:
+                # If no text is detected, leave the column empty
+                csv_rows.append([filename, "No text detected"])
 
     # Sort the rows alphabetically by filename (first column)
     csv_rows.sort(key=lambda x: x[0].lower())  # Sort case-insensitively
