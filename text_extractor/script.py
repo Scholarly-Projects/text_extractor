@@ -46,6 +46,9 @@ def extract_text_handwritten(image_path):
 
 # Function to filter out unrecognized words from extracted text
 def filter_recognized_words(text):
+    # Allow single characters followed by a period (like U.S.D.A)
+    text = re.sub(r'(?<=\b[A-Za-z]\.)[A-Za-z]', '', text)  # Remove trailing letters after a period
+
     # Remove unwanted characters while retaining common punctuation
     text = re.sub(r'[^a-zA-Z0-9\s.,;\'"?!-]', '', text)  # Keep letters, numbers, spaces, and some punctuation
     # Split the text into words
