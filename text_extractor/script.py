@@ -1,6 +1,7 @@
 import os
 import pytesseract
-from PIL import Image, ImageFilter
+import cv2
+import numpy as np
 import csv
 from spellchecker import SpellChecker
 import re
@@ -11,19 +12,31 @@ pytesseract.pytesseract.tesseract_cmd = '/opt/homebrew/bin/tesseract'  # Adjust 
 # Initialize the SpellChecker
 spell = SpellChecker()
 
-# Function to preprocess the image for better OCR results
+# Function to preprocess the image using OpenCV for better OCR results
 def preprocess_image(image_path):
-    with Image.open(image_path) as img:
-        # Resize the image slightly
-        img = img.resize((int(img.width * 1.1), int(img.height * 1.1)), Image.LANCZOS)  # Increase size by 10%
+    # Read the image using OpenCV
+    img = cv2.imread(image_path, cv2.IMREAD_COLOR)
+    
+    # Resize the image slightly to make it larger
+    img = cv2.resize(img, (int(img.shape[1] * 1.1), int(img.shape[0] * 1.1)), interpolation=cv2.INTER_LINEAR)
+    
+    # Convert to grayscale
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        # Convert to grayscale
-        img = img.convert('L')
-        # Apply a Gaussian blur to reduce noise
-        img = img.filter(ImageFilter.GaussianBlur(1))
-        # Binarize the image (thresholding)
-        img = img.point(lambda x: 0 if x < 128 else 255, '1')
-        return img
+    # Apply Gaussian blur to reduce noise
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    # Apply thresholding for binarization
+    _, thresh_img = cv2.threshold(blurred, 128, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    return thresh_img
+
+# Function to save the first preprocessed image as example_image.png
+def save_example_image(image_path, output_folder):
+    preprocessed_img = preprocess_image(image_path)
+    example_image_path = os.path.join(output_folder, 'example_image.png')
+    cv2.imwrite(example_image_path, preprocessed_img)
+    print(f"Example image saved as {example_image_path}")
 
 # Function to merge new recognized words into existing text
 def merge_text(existing_text, new_text):
@@ -41,11 +54,13 @@ def merge_text(existing_text, new_text):
     combined_text = ' '.join(combined_words)
     return combined_text.strip()
 
-# Function to extract text using the eng+handwriting model
+# Function to extract text using Tesseract OCR
 def extract_text(image_path, attempt=1, max_attempts=3):
     try:
         img = preprocess_image(image_path)
-        text = pytesseract.image_to_string(img, lang='eng+handwriting', config='--psm 6').strip()
+        # Convert the image array back to PIL Image for compatibility with Tesseract
+        # Use psm 12 for table/column recognition
+        text = pytesseract.image_to_string(img, lang='eng+handwriting', config='--psm 12').strip()
 
         if not text:
             return text
@@ -73,10 +88,7 @@ def filter_recognized_words(text):
     # Pattern filtering: Discard repeated characters, numeric-only words, and gibberish
     words = [word for word in words if not re.search(r'(.)\1{2,}', word) and not re.match(r'^\d+$', word)]
     
-    # Filter out common nonsensical words or excessive gibberish
-    words = [word for word in words if len(word) > 2 and len(set(word)) > 1]  # Requires more than one unique character
-
-    # Filter words using the spell checker and dictionary
+    # Filter words using the spell checker
     recognized_words = [word for word in words if word in spell]
 
     # Join the recognized words back into a string
@@ -89,14 +101,19 @@ def process_images(input_folder, output_folder, output_csv):
         os.makedirs(output_folder)
 
     csv_rows = []
+    first_image_path = None
 
     # Iterate through each file in the input folder
-    for filename in os.listdir(input_folder):
+    for filename in sorted(os.listdir(input_folder)):
         if filename.lower().endswith((".png", ".tiff", ".jpg", ".jpeg")):
             input_image_path = os.path.join(input_folder, filename)
             print(f"Processing {filename}...")
 
-            # Extract text using the eng+handwriting model, with rescan for nonsensical results
+            # Set the first image for saving an example
+            if first_image_path is None:
+                first_image_path = input_image_path
+
+            # Extract text using Tesseract OCR
             text = extract_text(input_image_path)
 
             # Filter out unrecognized words
@@ -109,6 +126,10 @@ def process_images(input_folder, output_folder, output_csv):
             else:
                 # If no text is detected, leave the column empty
                 csv_rows.append([filename, "No text detected"])
+
+    # Save an example image for visual inspection
+    if first_image_path:
+        save_example_image(first_image_path, output_folder)
 
     # Sort the rows alphabetically by filename (first column)
     csv_rows.sort(key=lambda x: x[0].lower())  # Sort case-insensitively
